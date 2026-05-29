@@ -569,7 +569,7 @@ class LocalAttentionFusion(nn.Module):
         Whether to apply a Layer Norm normalization. Default: true.
 
     share_weights (bool):
-        Whether to share the weights of the convolutional layers across the temporal scales. Default: false
+        Whether to share the weights of the convolutional layers across the parallel branches. Default: false
 
     """
 
