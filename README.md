@@ -50,8 +50,6 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun \
 
 **Note:** Multinode training is not supported yet.
 
- so it is required to set `--standalone` option and `--nnodes=1`.
-
 **Checkpoints**: You can evaluate also our trained models by downloading the model checkpoints found in [checkpoints](checkpoints/) dir.
 Download the model weights and set their path in the `evaluator_cfg.restore_hint` parameter.
 
