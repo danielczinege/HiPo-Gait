@@ -12,7 +12,7 @@ Config, for pickles with the channels: 0 left arm, 1 left leg, 2 right arm, 3 ri
   B   model: HiPoGaitDeepGaitV2
       body_part_channels: {left_arm: 0, left_leg: 6, right_arm: 2, right_leg: 7}
   C   model: HiPoGaitDeepGaitV2FeetChannel
-      foot_channels: {left_leg: 4, right_leg: 5}   (default)
+      foot_channels: [4, 5]   (left, right; default)
 """
 import torch
 
@@ -27,19 +27,20 @@ class HiPoGaitDeepGaitV2FeetChannel(HiPoGaitDeepGaitV2):
 
     def build_network(self, model_cfg):
         super().build_network(model_cfg)
-        self.foot_channels = model_cfg.get('foot_channels', {'left_leg': 4, 'right_leg': 5})
+        # Input channels of the left and right foot maps (in this order)
+        self.foot_channels = model_cfg.get('foot_channels', [4, 5])
 
-        # HBs1[0] is the left leg and HBs1[1] the right leg; their first conv takes leg + foot
+        # HBs1[0] is the left leg and HBs1[1] the right leg; their first conv takes leg + foot, hence 2 input channels instead of 1
         for i in (0, 1):
             self.HBs1[i].forward_block[0] = conv3x3(2, self.inplanes[0], 1)
 
     def forward(self, inputs):
-        # Same input layout handling as MetaHiPoGait.forward: [n, j, s, h, w]
-        maps = inputs[0][0]
-        maps = maps.unsqueeze(1) if maps.dim() == 4 else maps.transpose(1, 2)
+        # Same input layout handling as MetaHiPoGait.forward
+        maps = inputs[0][0].transpose(1, 2)  # [n, s, j, h, w] -> [n, j, s, h, w]
+        assert maps.size(1) > max(self.foot_channels), 'Input has no foot channels'
 
-        self.feet = [maps[:, self.foot_channels[side]: self.foot_channels[side] + 1]
-                     for side in ('left_leg', 'right_leg')]
+        # [left foot, right foot], each [n, 1, s, h, w], in the same order as HBs1[0] and HBs1[1]
+        self.feet = [maps[:, c: c + 1] for c in self.foot_channels]
 
         return super().forward(inputs)
 
