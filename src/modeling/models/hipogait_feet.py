@@ -26,7 +26,7 @@ class HiPoGaitDeepGaitV2FeetChannel(HiPoGaitDeepGaitV2):
     """
 
     def build_network(self, model_cfg):
-        super(HiPoGaitDeepGaitV2FeetChannel, self).build_network(model_cfg)
+        super().build_network(model_cfg)
         self.foot_channels = model_cfg.get('foot_channels', {'left_leg': 4, 'right_leg': 5})
 
         # HBs1[0] is the left leg and HBs1[1] the right leg; their first conv takes leg + foot
@@ -35,13 +35,13 @@ class HiPoGaitDeepGaitV2FeetChannel(HiPoGaitDeepGaitV2):
 
     def forward(self, inputs):
         # Same input layout handling as MetaHiPoGait.forward: [n, j, s, h, w]
-        sils = inputs[0][0]
-        sils = sils.unsqueeze(1) if sils.dim() == 4 else sils.transpose(1, 2)
+        maps = inputs[0][0]
+        maps = maps.unsqueeze(1) if maps.dim() == 4 else maps.transpose(1, 2)
 
-        self.feet = [sils[:, self.foot_channels[side]: self.foot_channels[side] + 1]
+        self.feet = [maps[:, self.foot_channels[side]: self.foot_channels[side] + 1]
                      for side in ('left_leg', 'right_leg')]
 
-        return super(HiPoGaitDeepGaitV2FeetChannel, self).forward(inputs)
+        return super().forward(inputs)
 
     def feed_hierblock1(self, block, x, **kwargs):
         # Append the same-side foot map to the leg map
@@ -49,4 +49,4 @@ class HiPoGaitDeepGaitV2FeetChannel(HiPoGaitDeepGaitV2):
             if block is self.HBs1[i]:
                 x = torch.cat([x, self.feet[i]], dim=1)
 
-        return super(HiPoGaitDeepGaitV2FeetChannel, self).feed_hierblock1(block, x, **kwargs)
+        return super().feed_hierblock1(block, x, **kwargs)
