@@ -18,6 +18,8 @@ parser.add_argument('--log_to_file', action='store_true',
 parser.add_argument('--iter', default=0, help="iter to restore")
 parser.add_argument('--out_dir', type=str,
                     default='output/', help="path of output directory")
+parser.add_argument('--seed', type=int, default=0,
+                    help="run seed; each process uses seed * world_size + rank, so 0 keeps the original seeding")
 opt = parser.parse_args()
 
 
@@ -34,7 +36,8 @@ def initialization(cfgs, training):
 
     msg_mgr.log_info(engine_cfg)
 
-    seed = torch.distributed.get_rank()
+    # Distinct runs never share a process seed: seed 0 uses 0..n-1, seed 1 uses n..2n-1, ...
+    seed = opt.seed * torch.distributed.get_world_size() + torch.distributed.get_rank()
     init_seeds(seed)
 
 
