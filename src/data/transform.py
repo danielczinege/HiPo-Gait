@@ -212,8 +212,13 @@ class LRSwap(object):
                B's model reads only channels 0-3; its 4-5 are there for the feet swap.
     part       'legs': whole legs, feet included. 'feet': only the feet (conditions B and C).
     rate       share of the frames to swap; 1 swaps the whole sequence.
-    run_len    swaps come in runs of this many frames, at random positions.
+    run_len    swaps come in runs of this many frames; runs that follow each other make longer swaps.
     """
+
+    # Channel order after a legs swap, per condition
+    LEGS_SWAPPED = {'A': [0, 3, 2, 1],
+                    'B': [0, 3, 2, 1, 4, 5],    # 4-5 stay: B's model does not read them
+                    'C': [0, 3, 2, 1, 5, 4]}
 
     def __init__(self, condition, part, rate, run_len=4):
         assert condition in ('A', 'B', 'C') and part in ('legs', 'feet')
@@ -225,35 +230,35 @@ class LRSwap(object):
 
     def __call__(self, seq):
         seq = seq.copy()
-        frames = self.frames_to_swap(seq)
+        swapped = self.frames_to_swap(seq)
 
         if self.part == 'legs':
-            # new channel order: left and right leg trade places, and so do the feet (if present)
-            order = [0, 3, 2, 1] if self.condition == 'A' else [0, 3, 2, 1, 5, 4]
-            seq[frames] = seq[frames][:, order]
+            seq[swapped] = seq[swapped][:, self.LEGS_SWAPPED[self.condition]]
+        elif self.condition == 'C':
+            seq[swapped] = seq[swapped][:, [0, 1, 2, 3, 5, 4]]
         else:
-            left_foot, right_foot = seq[frames, 4], seq[frames, 5]
-            if self.condition == 'B':
-                # The fusion sums the keypoint maps and divides by sqrt(number of keypoints), so
-                # leg+foot = (leg + foot) / sqrt(2) in channel units: replace one foot by the other.
-                seq[frames, 1] += (right_foot - left_foot) / np.sqrt(2)
-                seq[frames, 3] += (left_foot - right_foot) / np.sqrt(2)
-            seq[frames, 4], seq[frames, 5] = right_foot, left_foot
+            # B: the fusion sums the keypoint maps and divides by sqrt(number of keypoints), so
+            # leg+foot = (leg + foot) / sqrt(2) in channel units. Replace one foot by the other.
+            left_foot, right_foot = seq[swapped, 4], seq[swapped, 5]
+            seq[swapped, 1] += (right_foot - left_foot) / np.sqrt(2)
+            seq[swapped, 3] += (left_foot - right_foot) / np.sqrt(2)
         return seq
 
     def frames_to_swap(self, seq):
-        """Boolean mask over the frames: runs of run_len frames covering about rate of them
-        (slightly fewer, since runs can overlap: ~0.18 of the frames for rate 0.2)."""
+        """Boolean mask over the frames of seq, True where left and right get swapped."""
         n = len(seq)
         if self.rate >= 1:
             return np.ones(n, dtype=bool)
         # Seeded by the sequence's left arm map, which A, B and C share: every model gets the same swaps
         rng = np.random.default_rng(zlib.crc32(seq[:, 0].tobytes()))
-        n_runs = rng.binomial(n, self.rate / self.run_len)
-        swap = np.zeros(n, dtype=bool)
-        for start in rng.integers(0, n, n_runs):
-            swap[start:start + self.run_len] = True
-        return swap
+
+        # n // run_len runs would fill the sequence; each of them is swapped with probability rate
+        n_runs = rng.binomial(n // self.run_len, self.rate)
+
+        # The swapped runs and the remaining unswapped frames, in a random order
+        pieces = [True] * n_runs + [False] * (n - n_runs * self.run_len)
+        rng.shuffle(pieces)
+        return np.concatenate([np.full(self.run_len if piece else 1, piece) for piece in pieces])
 
 
 # ******************************************
