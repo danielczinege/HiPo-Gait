@@ -3,6 +3,7 @@ import random
 import torchvision.transforms as T
 import cv2
 import math
+import zlib
 from data import transform as base_transform
 from utils import is_list, is_dict, get_valid_args
 
@@ -194,7 +195,67 @@ class RandomAffine(object):
             if len(seq.shape) == 4:
                 seq = seq.transpose(0, 3, 1, 2)
             return seq
-        
+
+
+# **************** Left/right swaps (swap test) ****************
+
+
+class LRSwap(object):
+    """Swaps left and right in some frames of a test sequence [s, c, h, w], to measure how much
+    ViTPose's left/right swaps hurt a trained model. `train_test.py --lr_swap CONDITION:PART:RATE`
+    puts it in front of the test transform.
+
+    condition  'A', 'B' or 'C', which decides the channel layout (as staged by run_hipogait.sh):
+                 A   0 left arm, 1 left leg,      2 right arm, 3 right leg
+                 B   0 left arm, 1 left leg+foot, 2 right arm, 3 right leg+foot, 4 left foot, 5 right foot
+                 C   0 left arm, 1 left leg,      2 right arm, 3 right leg,      4 left foot, 5 right foot
+               B's model reads only channels 0-3; its 4-5 are there for the feet swap.
+    part       'legs': whole legs, feet included. 'feet': only the feet (conditions B and C).
+    rate       share of the frames to swap; 1 swaps the whole sequence.
+    run_len    swaps come in runs of this many frames, at random positions.
+    """
+
+    def __init__(self, condition, part, rate, run_len=4):
+        assert condition in ('A', 'B', 'C') and part in ('legs', 'feet')
+        assert not (part == 'feet' and condition == 'A'), 'condition A has no feet'
+        self.condition = condition
+        self.part = part
+        self.rate = rate
+        self.run_len = run_len
+
+    def __call__(self, seq):
+        seq = seq.copy()
+        frames = self.frames_to_swap(seq)
+
+        if self.part == 'legs':
+            # new channel order: left and right leg trade places, and so do the feet (if present)
+            order = [0, 3, 2, 1] if self.condition == 'A' else [0, 3, 2, 1, 5, 4]
+            seq[frames] = seq[frames][:, order]
+        else:
+            left_foot, right_foot = seq[frames, 4], seq[frames, 5]
+            if self.condition == 'B':
+                # The fusion sums the keypoint maps and divides by sqrt(number of keypoints), so
+                # leg+foot = (leg + foot) / sqrt(2) in channel units: replace one foot by the other.
+                seq[frames, 1] += (right_foot - left_foot) / np.sqrt(2)
+                seq[frames, 3] += (left_foot - right_foot) / np.sqrt(2)
+            seq[frames, 4], seq[frames, 5] = right_foot, left_foot
+        return seq
+
+    def frames_to_swap(self, seq):
+        """Boolean mask over the frames: runs of run_len frames covering about rate of them
+        (slightly fewer, since runs can overlap: ~0.18 of the frames for rate 0.2)."""
+        n = len(seq)
+        if self.rate >= 1:
+            return np.ones(n, dtype=bool)
+        # Seeded by the sequence's left arm map, which A, B and C share: every model gets the same swaps
+        rng = np.random.default_rng(zlib.crc32(seq[:, 0].tobytes()))
+        n_runs = rng.binomial(n, self.rate / self.run_len)
+        swap = np.zeros(n, dtype=bool)
+        for start in rng.integers(0, n, n_runs):
+            swap[start:start + self.run_len] = True
+        return swap
+
+
 # ******************************************
 
 def Compose(trf_cfg):
